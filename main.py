@@ -23,7 +23,7 @@ import time
 import logging
 import pyautogui
 import pyperclip
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import sys
 
 # ─────────────────────────────────────────────
@@ -34,6 +34,13 @@ APP_TITLE      = "IPOT"              # Window title keyword (partial match)
 STOCK_CODE     = "MBMA"             # Stock to query
 SAVE_FOLDER    = r"g:\Ardhi\Activity Summary\INCo"  # Folder where CSVs are saved (must exist)
 
+# ── Edit dates here ──────────────────────────────
+DATE_START = date(2026, 4, 19)   # newer date (downloads in reverse)
+DATE_END   = date(2026, 4, 1)    # older date
+
+CENTER_X = 960
+CENTER_y = 450
+
 # Hardcoded context menu item — set after first run to skip the slow desktop scan.
 # Leave all as "" to auto-discover (slow path will log the values for you to fill in).
 SAVE_CSV_MENU_WINDOW_TITLE = "Context"             # title of the Menu window itself (usually "" for context menus)
@@ -41,9 +48,9 @@ SAVE_CSV_MENU_ITEM         = "Save To CSV"  # title of the menu item to click
 SAVE_CSV_MENU_CONTROL_TYPE = ""     # control_type of the menu item
 
 # Timing delays (seconds) — increase if the app is slow to respond
-SLEEP_SHORT    = 0.5
-SLEEP_MEDIUM   = 0.8
-SLEEP_LONG     = 2.5
+SLEEP_SHORT    = 0.45
+SLEEP_MEDIUM   = 0.65
+SLEEP_LONG     = 1.5
 
 # ─────────────────────────────────────────────
 # LOGGING SETUP
@@ -63,6 +70,15 @@ log = logging.getLogger("ipot")
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
+
+_desktop_cache = None
+
+def _get_desktop():
+    global _desktop_cache
+    if _desktop_cache is None:
+        import pywinauto
+        _desktop_cache = pywinauto.Desktop(backend="uia")
+    return _desktop_cache
 
 def pause(secs=SLEEP_MEDIUM):
     log.debug(f"pause({secs}s) ...")
@@ -100,8 +116,8 @@ def fmt_date(d: date) -> str:
     return result
 
 def fmt_filename(d: date) -> str:
-    """Filename: YYYY-MM-DD (safe for Windows)."""
-    result = d.strftime("%Y-%m-%d")
+    """Filename: YYYY-MM-DD_HH-MM-SS (safe for Windows)."""
+    result = d.strftime("%Y-%m-%d") + datetime.now().strftime("_%H-%M-%S")
     log.debug(f"fmt_filename({d}) → '{result}'")
     return result
 
@@ -146,7 +162,7 @@ def find_window():
             raise Exception("No IPOT windows found")
 
         # Wrap handles as lightweight pywinauto window specs for compatibility
-        desktop = pywinauto.Desktop(backend="uia")
+        desktop = _get_desktop()
         matches = [desktop.window(handle=h) for h in handles]
 
         # Prefer a visible, enabled window; fall back to first match
@@ -201,92 +217,32 @@ def open_broker_summary(win):
 
 
 def set_fields(win, stock: str, query_date: date):
-    """Fill in the three input fields: stock code, from-date, to-date."""
+    """Open Broker Summary dialog and fill fields via keyboard — dialog opens focused on stock field."""
     date_str = fmt_date(query_date)
     log.info(f"set_fields: stock='{stock}'  date='{date_str}'")
-
-    win.set_focus()
-    pause(SLEEP_SHORT)
-
-    log.debug("set_fields: enumerating Edit controls in window")
-    try:
-        fields = win.children(control_type="Edit")
-        log.debug(f"set_fields: found {len(fields)} Edit field(s)")
-        for i, f in enumerate(fields):
-            log.debug(
-                f"  field[{i}] title='{f.window_text()}'"
-                f"  auto_id='{f.automation_id()}'"
-                f"  value='{f.get_value() if hasattr(f, 'get_value') else '?'}'"
-            )
-
-        if len(fields) >= 3:
-            log.debug(f"set_fields: setting field[0] (stock) → '{stock}'")
-            fields[0].set_focus()
-            fields[0].set_edit_text(stock)
-            pause(SLEEP_SHORT)
-
-            log.debug(f"set_fields: setting field[1] (from-date) → '{date_str}'")
-            fields[1].set_focus()
-            fields[1].set_edit_text(date_str)
-            pause(SLEEP_SHORT)
-
-            log.debug(f"set_fields: setting field[2] (to-date) → '{date_str}'")
-            fields[2].set_focus()
-            fields[2].set_edit_text(date_str)
-            pause(SLEEP_SHORT)
-
-            # Tab moves focus to Value/Net select — press N to choose Net
-            log.debug("set_fields: Tab → Value/Net select, pressing N to choose Net")
-            pyautogui.press("tab")
-            pause(SLEEP_SHORT)
-            pyautogui.press("n")
-
-            log.info(f"set_fields: all fields set — {stock} | {date_str} | {date_str}")
-            return
-        else:
-            log.warning(f"set_fields: only {len(fields)} Edit field(s) found, need ≥3")
-            raise Exception(f"expected ≥3 Edit fields, got {len(fields)}")
-
-    except Exception as e:
-        log.warning(f"set_fields: direct field access failed ({e}), switching to Tab fallback")
-
-    # Fallback: Tab through fields
-    # log.debug("set_fields: pressing Alt+F4 to close any stray dialog")
-    # pyautogui.hotkey("alt", "F4")
-    # pause(SLEEP_SHORT)
-    log.debug("set_fields: re-opening Broker Summary dialog")
     open_broker_summary(win)
-    log.debug("set_fields: Tab → field 1, typing stock code")
-    # pyautogui.press("tab")
     type_text(stock)
-    log.debug("set_fields: Tab → field 2, typing from-date")
     pyautogui.press("tab")
     type_date(query_date)
-    log.debug("set_fields: Tab → field 3, typing to-date")
     pyautogui.press("tab")
     type_date(query_date)
-
-    # Tab moves focus to Value/Net select — press N to choose Net
-    log.debug("set_fields: Tab → Value/Net select, pressing N to choose Net (fallback path)")
     pyautogui.press("tab")
     pause(SLEEP_SHORT)
     pyautogui.press("n")
-    log.info(f"set_fields: fields set via Tab fallback — {stock} | {date_str} | {date_str}")
+    log.info(f"set_fields: done — {stock} | {date_str}")
 
 
 def trigger_search(win):
-    """Press Enter or click Search/OK to load the data."""
-    log.info("trigger_search: looking for Search/OK/Go/Load button")
+    """Press Enter to submit, then wait for the DataGrid to be ready instead of sleeping."""
+    log.info("trigger_search: pressing Enter to submit")
     pyautogui.press("enter")
+    log.debug("trigger_search: waiting for DataGrid (max 10s)")
     # try:
-    #     btn = win.child_window(title_re="(Search|OK|Go|Load)", control_type="Button")
-    #     log.debug(f"trigger_search: found button '{btn.window_text()}', clicking")
-    #     btn.click_input()
-    #     log.info("trigger_search: button clicked")
+    #     win.child_window(control_type="DataGrid").wait("ready", timeout=10)
+    #     log.info("trigger_search: DataGrid ready")
     # except Exception as e:
-    #     log.warning(f"trigger_search: button not found ({e}), pressing Enter as fallback")
-    #     pyautogui.press("enter")
-    #     log.info("trigger_search: Enter pressed")
+    #     log.warning(f"trigger_search: DataGrid wait failed ({e}), falling back to fixed sleep")
+    #     pause(SLEEP_LONG)
     pause(SLEEP_LONG)
     log.info("trigger_search: done waiting for results to load")
 
@@ -299,10 +255,14 @@ def save_to_csv(win, query_date: date):
     log.debug("save_to_csv: looking for DataGrid control")
     try:
         grid = win.child_window(control_type="DataGrid")
-        rect = grid.rectangle()
-        height = rect.bottom - rect.top
-        cx = (rect.left + rect.right) // 2
-        cy = (rect.top + rect.bottom)
+        if not CENTER_X or not CENTER_y:
+            rect = grid.rectangle()
+            height = rect.bottom - rect.top
+            cx = (rect.left + rect.right) // 2
+            cy = (rect.top + rect.bottom)
+        else:
+            cx = CENTER_X
+            cy = CENTER_y
         log.debug(f"save_to_csv: DataGrid rect=top:{rect.top} bottom:{rect.bottom} left:{rect.left} right:{rect.right} height:{height}")
         log.debug(f"save_to_csv: moving mouse to ({cx},{cy})")
         pyautogui.moveTo(cx, cy)
@@ -323,118 +283,104 @@ def save_to_csv(win, query_date: date):
         pause(SLEEP_SHORT)
         pyautogui.rightClick(cx, cy)
 
-    pause(SLEEP_MEDIUM)
+    pause(SLEEP_SHORT)  # let context menu render
 
-    log.debug("save_to_csv: looking for context menu with 'Save.*CSV' item")
+    # Primary: move mouse right into the menu, then down to the 3rd item and click.
+    click_x, click_y = pyautogui.position()
+    menu_x = click_x + 15            # step right into the menu body
+    menu_y = click_y + 22 * 1 + 11   # centre of 3rd item (~22 px/item, 0-based index 2)
+    log.debug(f"save_to_csv: mouse nav — post-click=({click_x},{click_y}), 3rd item≈({menu_x},{menu_y})")
     try:
-        import pywinauto
-        if SAVE_CSV_MENU_ITEM:
-            # Fast path: find the Menu window by exact title (context menus usually have
-            # an empty title so this is much faster than title_re=".*"), then find the
-            # known item inside it as a child — avoids the full desktop UIA scan.
-            log.debug(
-                f"save_to_csv: fast path — "
-                f"menu_window_title='{SAVE_CSV_MENU_WINDOW_TITLE}'  "
-                f"item='{SAVE_CSV_MENU_ITEM}'  control_type='{SAVE_CSV_MENU_CONTROL_TYPE}'"
-            )
-            ctx_menu = pywinauto.Desktop(backend="uia").window(
-                title=SAVE_CSV_MENU_WINDOW_TITLE, control_type="Menu"
-            )
-            log.debug(
-                    f"save_to_csv: context menu found — title='{ctx_menu.window_text()}'"   
-                    f"  control_type='{ctx_menu.element_info.control_type}'"
-                    f"  auto_id='{ctx_menu.automation_id()}'"
-                    f"  class='{ctx_menu.friendly_class_name()}'"
-            )
-            # Use title_re for child lookup — the item's stored text may include
-            # an ampersand accelerator (e.g. "Save to &CSV") that breaks exact match.
-            target_item = ctx_menu.child_window(
-                title_re=f".*{SAVE_CSV_MENU_ITEM}.*"
-            )
-        else:
-            # Slow path: scan desktop for any Menu window, then find item by regex.
-            # Run this once to discover the values, then hardcode them above.
-            log.debug("save_to_csv: slow path — scanning desktop for Menu window")
-            ctx_menu = pywinauto.Desktop(backend="uia").window(
-                title_re=".*", control_type="Menu"
-            )
-            log.info(
-                f"save_to_csv: Menu window found — "
-                f"title='{ctx_menu.window_text()}'  "
-                f"(set SAVE_CSV_MENU_WINDOW_TITLE to this value)"
-            )
-            # Log all menu items for debugging
-            try:
-                items = ctx_menu.children()
-                log.debug(f"save_to_csv: context menu has {len(items)} item(s):")
-                for item in items:
-                    log.debug(
-                        f"  title='{item.window_text()}'"
-                        f"  control_type='{item.element_info.control_type}'"
-                        f"  auto_id='{item.automation_id()}'"
-                        f"  class='{item.friendly_class_name()}'"
-                    )
-            except Exception:
-                pass
-            target_item = ctx_menu.child_window(title_re=".*Save.*CSV.*")
-
-        log.info(
-            f"save_to_csv: found menu item"
-            f"  title='{target_item.window_text()}'"
-            f"  control_type='{target_item.element_info.control_type}'"
-            f"  auto_id='{target_item.automation_id()}'"
-            f"  class='{target_item.friendly_class_name()}'"
-        )
-        log.debug(f"save_to_csv: clicking menu item '{target_item.window_text()}'")
-        target_item.click_input()
-        log.info("save_to_csv: 'Save to CSV' menu item clicked")
+        pyautogui.moveTo(menu_x, menu_y)
+        pause(SLEEP_SHORT)
+        pyautogui.click()
+        log.info("save_to_csv: clicked 3rd menu item via mouse navigation")
     except Exception as e:
-        log.warning(f"save_to_csv: context menu approach failed ({e}), pressing 'S' as shortcut")
-        pyautogui.hotkey("s")
+        log.warning(f"save_to_csv: mouse nav failed ({e}), falling back to UIA scan")
+        desktop = _get_desktop()
+        try:
+            if SAVE_CSV_MENU_ITEM:
+                log.debug(
+                    f"save_to_csv: UIA fast path — "
+                    f"title='{SAVE_CSV_MENU_WINDOW_TITLE}'  item='{SAVE_CSV_MENU_ITEM}'"
+                )
+                ctx_menu = desktop.window(title=SAVE_CSV_MENU_WINDOW_TITLE, control_type="Menu")
+                target_item = ctx_menu.child_window(title_re=f".*{SAVE_CSV_MENU_ITEM}.*")
+            else:
+                log.debug("save_to_csv: UIA slow path — scanning desktop for Menu window")
+                ctx_menu = desktop.window(title_re=".*", control_type="Menu")
+                log.info(
+                    f"save_to_csv: Menu found — title='{ctx_menu.window_text()}'  "
+                    f"(set SAVE_CSV_MENU_WINDOW_TITLE to this value)"
+                )
+                try:
+                    for item in ctx_menu.children():
+                        log.debug(
+                            f"  title='{item.window_text()}'"
+                            f"  control_type='{item.element_info.control_type}'"
+                        )
+                except Exception:
+                    pass
+                target_item = ctx_menu.child_window(title_re=".*Save.*CSV.*")
+            log.info(f"save_to_csv: UIA found '{target_item.window_text()}', clicking")
+            target_item.click_input()
+            log.info("save_to_csv: clicked via UIA fallback")
+        except Exception as e2:
+            log.warning(f"save_to_csv: UIA fallback also failed ({e2}), pressing 'S'")
+            pyautogui.hotkey("s")
 
     pause(SLEEP_MEDIUM)
     _handle_save_dialog(filename)
 
 
 def _handle_save_dialog(filename: str):
-    """Handle the Save file dialog: set filename and click Save."""
-    import pywinauto
-    log.info(f"_handle_save_dialog: waiting for Save dialog, filename='{filename}'")
-    pause(SLEEP_MEDIUM)
+    """Handle the Save file dialog — filename field is already focused on open."""
+    log.info(f"_handle_save_dialog: filename='{filename}'")
+    pause(SLEEP_SHORT)  # let focus settle on the filename field
+    pyautogui.hotkey("ctrl", "a")
+    pause(SLEEP_SHORT)
+    pyautogui.typewrite(filename, interval=0.05)
+    pyautogui.press("enter")
 
-    try:
-        save_dlg = pywinauto.Desktop(backend="uia").window(
-            title_re="(Save|Save As|另存为|저장)"
-        )
-        log.debug(f"_handle_save_dialog: dialog found — title='{save_dlg.window_text()}'")
-        save_dlg.set_focus()
-        pause(SLEEP_SHORT)
+    # """Handle the Save file dialog: set filename and click Save."""
+    # log.info(f"_handle_save_dialog: saved as '{filename}.csv'")
+    # import pywinauto
+    # log.info(f"_handle_save_dialog: waiting for Save dialog, filename='{filename}'")
+    # pause(SLEEP_MEDIUM)
 
-        log.debug("_handle_save_dialog: locating filename Edit field")
-        fname_field = save_dlg.child_window(
-            control_type="Edit", title_re="(File name|FileName|文件名)"
-        )
-        log.debug(f"_handle_save_dialog: current filename field value='{fname_field.window_text()}'")
-        fname_field.set_focus()
-        fname_field.set_edit_text(filename)
-        log.debug(f"_handle_save_dialog: filename set to '{filename}'")
-        pause(SLEEP_SHORT)
+    # try:
+    #     save_dlg = pywinauto.Desktop(backend="uia").window(
+    #         title_re="(Save|Save As|另存为|저장)"
+    #     )
+    #     log.debug(f"_handle_save_dialog: dialog found — title='{save_dlg.window_text()}'")
+    #     save_dlg.set_focus()
+    #     pause(SLEEP_SHORT)
 
-        log.debug("_handle_save_dialog: clicking Save/OK button")
-        save_dlg.child_window(
-            title_re="(Save|OK|确定)", control_type="Button"
-        ).click_input()
-        pause(SLEEP_MEDIUM)
-        log.info(f"_handle_save_dialog: saved as '{filename}.csv'")
+    #     log.debug("_handle_save_dialog: locating filename Edit field")
+    #     fname_field = save_dlg.child_window(
+    #         control_type="Edit", title_re="(File name|FileName|文件名)"
+    #     )
+    #     log.debug(f"_handle_save_dialog: current filename field value='{fname_field.window_text()}'")
+    #     fname_field.set_focus()
+    #     fname_field.set_edit_text(filename)
+    #     log.debug(f"_handle_save_dialog: filename set to '{filename}'")
+    #     pause(SLEEP_SHORT)
 
-    except Exception as e:
-        log.warning(f"_handle_save_dialog: dialog not found via pywinauto ({e}), using keyboard fallback")
-        pyautogui.hotkey("ctrl", "a")
-        pause(SLEEP_SHORT)
-        type_text(filename)
-        pyautogui.press("enter")
-        pause(SLEEP_MEDIUM)
-        log.info(f"_handle_save_dialog: saved as '{filename}.csv' (keyboard fallback)")
+    #     log.debug("_handle_save_dialog: clicking Save/OK button")
+    #     save_dlg.child_window(
+    #         title_re="(Save|OK|确定)", control_type="Button"
+    #     ).click_input()
+    #     pause(SLEEP_MEDIUM)
+    #     log.info(f"_handle_save_dialog: saved as '{filename}.csv'")
+
+    # except Exception as e:
+    #     log.warning(f"_handle_save_dialog: dialog not found via pywinauto ({e}), using keyboard fallback")
+    #     pyautogui.hotkey("ctrl", "a")
+    #     pause(SLEEP_SHORT)
+    #     type_text(filename)
+    #     pyautogui.press("enter")
+    #     pause(SLEEP_MEDIUM)
+    #     log.info(f"_handle_save_dialog: saved as '{filename}.csv' (keyboard fallback)")
 
 
 # ─────────────────────────────────────────────
@@ -500,15 +446,14 @@ def run(start_date: date, end_date: date):
             pause(SLEEP_SHORT)
             pyautogui.hotkey("alt", "f4")
             pause(SLEEP_SHORT)
+            pyautogui.moveTo(CENTER_X, 10)
+            pyautogui.click()
 
     log.info("=" * 50)
     log.info("All done!")
 
 
 if __name__ == "__main__":
-    # ── Edit dates here ──────────────────────────────
-    DATE_START = date(2026, 4, 19)   # newer date (downloads in reverse)
-    DATE_END   = date(2026, 4, 1)    # older date
     # ─────────────────────────────────────────────────
     log.info("Starting. Please open IPOT and click the header!")
     pause(SLEEP_LONG)
