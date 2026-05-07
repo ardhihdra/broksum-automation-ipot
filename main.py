@@ -31,12 +31,29 @@ import sys
 # ─────────────────────────────────────────────
 
 APP_TITLE      = "IPOT"              # Window title keyword (partial match)
-STOCK_CODE     = "MBMA"             # Stock to query
+STOCK_CODES     = [
+    "ADRO", "ANTM", "AADI", "ACRO",
+    "BUVA", "BRPT", "BIPI", "BRMS", "BSDE", "BBCA", "BDKR", "BMTR", "BNBR", "BUMI",
+    "CBDK", "CDIA", "COCO", "COCO", "CUAN", "CTTH", "CUAN"
+    "DATA", "DAAZ", "DEWI", 
+    "EMTK", "ENRG", "EXCL", "ELSA", "EMAS", "ESSA"
+    "GGRM", "GOTO",
+    "IMPC", "INCO", "INTP", "ITMG", "INDY", "ICON", "INET"
+    "JARR",
+    "MINA", "MBMA", "MBSS", "MINA",
+    "PANI", "PGAS", "PTBA", "PSKT", "PTRO",
+    "RMKO", "RMKE"
+    "SUPA", "SGER", "SMBR", "SSIA", "SINI", "SMRA", 
+    "TKIM", "TBIG", "TINS", "TLKM",
+    "UNTR",
+    "VKTR",
+    "WBSA",
+]            # Stock to query
 SAVE_FOLDER    = r"g:\Ardhi\Activity Summary\INCo"  # Folder where CSVs are saved (must exist)
 
 # ── Edit dates here ──────────────────────────────
-DATE_START = date(2026, 4, 19)   # newer date (downloads in reverse)
-DATE_END   = date(2026, 4, 1)    # older date
+DATE_START = date(2026, 5, 7)   # newer date (downloads in reverse)
+DATE_END   = date(2026, 5, 7)    # older date
 
 CENTER_X = 960
 CENTER_y = 450
@@ -115,10 +132,10 @@ def fmt_date(d: date) -> str:
     log.debug(f"fmt_date({d}) → '{result}'")
     return result
 
-def fmt_filename(d: date) -> str:
+def fmt_filename(stock_code: str, d: date) -> str:
     """Filename: YYYY-MM-DD_HH-MM-SS (safe for Windows)."""
-    result = d.strftime("%Y-%m-%d") + datetime.now().strftime("_%H-%M-%S")
-    log.debug(f"fmt_filename({d}) → '{result}'")
+    result = stock_code + "_" + d.strftime("%Y-%m-%d") + datetime.now().strftime("_%H-%M-%S")
+    log.debug(f"fmt_filename({stock_code}, {d}) → '{result}'")
     return result
 
 def is_weekday(d: date) -> bool:
@@ -247,9 +264,9 @@ def trigger_search(win):
     log.info("trigger_search: done waiting for results to load")
 
 
-def save_to_csv(win, query_date: date):
+def save_to_csv(win, stock_code: str, query_date: date):
     """Right-click the data grid and choose Save to CSV."""
-    filename = fmt_filename(query_date)
+    filename = fmt_filename(stock_code, query_date)
     log.info(f"save_to_csv: target filename='{filename}'")
 
     log.debug("save_to_csv: looking for DataGrid control")
@@ -387,7 +404,7 @@ def _handle_save_dialog(filename: str):
 # MAIN LOOP
 # ─────────────────────────────────────────────
 
-def run(start_date: date, end_date: date):
+def run(stock_code: str,start_date: date, end_date: date):
     """
     Download Broker Summary CSVs for every weekday from start_date down to end_date.
 
@@ -397,7 +414,7 @@ def run(start_date: date, end_date: date):
     log.info("=" * 50)
     log.info("IPOT Broker Summary Automation")
     log.info(f"Range: {start_date} → {end_date}")
-    log.info(f"Stock: {STOCK_CODE}")
+    log.info(f"Stock: {stock_code}")
     log.info(f"Save folder: {SAVE_FOLDER}")
     log.info("=" * 50)
 
@@ -421,13 +438,13 @@ def run(start_date: date, end_date: date):
         try:
 
             log.info("  Step A: set_fields")
-            set_fields(win, STOCK_CODE, d)
+            set_fields(win, stock_code, d)
 
             log.info("  Step B: trigger_search")
             trigger_search(win)
 
             log.info("  Step C: save_to_csv")
-            save_to_csv(win, d)
+            save_to_csv(win, stock_code, d)
 
             elapsed = time.time() - t0
             log.info(f"  Done in {elapsed:.1f}s")
@@ -457,4 +474,5 @@ if __name__ == "__main__":
     # ─────────────────────────────────────────────────
     log.info("Starting. Please open IPOT and click the header!")
     pause(SLEEP_LONG)
-    run(DATE_START, DATE_END)
+    for stock_code in STOCK_CODES:
+        run(stock_code, DATE_START, DATE_END)
